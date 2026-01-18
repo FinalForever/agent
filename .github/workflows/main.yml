@@ -1,4 +1,4 @@
-name: Build Nezha Agent V1 (Debug & Fix)
+name: Build Nezha Agent V1 (Final Fix)
 
 on:
   workflow_dispatch:
@@ -18,38 +18,24 @@ jobs:
         with:
           go-version: '1.22'
 
-      - name: Locate and Patch Monitor Code
+      - name: Patch Monitor Code (Targeted Fix)
         run: |
-          echo "🔍 正在全盘搜索网络监控代码..."
+          # 我们已经确认了核心文件路径，直接精准修改
+          TARGET_FILE="pkg/monitor/nic/nic.go"
           
-          # 1. 寻找包含 IOCounters (获取网卡流量的函数) 的文件
-          # 使用 || true 防止找不到时报错退出
-          TARGET_FILE=$(grep -rl "IOCounters" . || true)
+          echo "🎯 目标锁定: $TARGET_FILE"
           
-          if [ -z "$TARGET_FILE" ]; then
-            echo "⚠️ 警告：没找到 IOCounters 关键字，尝试搜索 'lo' 关键字..."
-            TARGET_FILE=$(grep -rl '"lo"' . | grep ".go" || true)
-          fi
-
-          if [ -z "$TARGET_FILE" ]; then
-            echo "❌ 严重错误：找不到任何监控相关的代码文件。可能官方改了变量名。"
-            exit 1
-          fi
-          
-          echo "✅ 锁定目标文件: $TARGET_FILE"
-          echo "📄 打印文件原始内容（用于排错）："
-          cat "$TARGET_FILE"
-          
-          echo "🛠️ 开始应用补丁..."
-          
-          # 核心魔法：直接把所有 '== "lo"' (是lo则...) 替换为 '!= "ppp0"' (不是ppp0则...)
-          # 这样就实现了：如果不是 ppp0，就执行后面的 continue (跳过)
-          # 我们同时匹配双引号 "lo" 和单引号 'lo' 以防万一
+          # 1. 简单暴力的逻辑反转：
+          # 原理：源码里一定有一句判断 '== "lo"' (如果是回环lo，就跳过/continue)
+          # 我们把它改成 '!= "ppp0"' (如果不是 ppp0，就跳过/continue)
+          # 这样就实现了【只监控 ppp0】
           
           sed -i 's/== "lo"/!= "ppp0"/g' "$TARGET_FILE"
-          sed -i "s/== 'lo'/!= 'ppp0'/g" "$TARGET_FILE"
           
-          echo "🎉 补丁应用完成！检查修改点："
+          # 双重保险：有些代码可能写的是 if "lo" == ...
+          sed -i 's/"lo" ==/"ppp0" !=/g' "$TARGET_FILE"
+          
+          echo "✅ 修改完成！差异如下："
           git diff
 
       - name: Build ARM64 Binary
