@@ -1,4 +1,4 @@
-name: Fix Build Nezha Agent (ppp0 Only)
+name: Build Nezha Agent V1 (Debug & Fix)
 
 on:
   workflow_dispatch:
@@ -18,18 +18,38 @@ jobs:
         with:
           go-version: '1.22'
 
-      - name: Patch Code (Smart Logic Flip)
+      - name: Locate and Patch Monitor Code
         run: |
-          echo "🔍 正在寻找并修改网络监控逻辑..."
+          echo "🔍 正在全盘搜索网络监控代码..."
           
-          # 核心逻辑：
-          # 1. 搜索 pkg 目录下包含 == "lo" 的文件（这通常是排除回环口的逻辑）
-          # 2. 直接将 '== "lo"' 替换为 '!= "ppp0"'
-          # 3. 逻辑变化：从 "是lo就跳过" 变成了 "不是ppp0就跳过" -> 也就是只保留 ppp0
+          # 1. 寻找包含 IOCounters (获取网卡流量的函数) 的文件
+          # 使用 || true 防止找不到时报错退出
+          TARGET_FILE=$(grep -rl "IOCounters" . || true)
           
-          grep -rl '== "lo"' pkg | xargs sed -i 's/== "lo"/!= "ppp0"/g'
+          if [ -z "$TARGET_FILE" ]; then
+            echo "⚠️ 警告：没找到 IOCounters 关键字，尝试搜索 'lo' 关键字..."
+            TARGET_FILE=$(grep -rl '"lo"' . | grep ".go" || true)
+          fi
+
+          if [ -z "$TARGET_FILE" ]; then
+            echo "❌ 严重错误：找不到任何监控相关的代码文件。可能官方改了变量名。"
+            exit 1
+          fi
           
-          echo "✅ 修改完成！让我们看看改了哪里（以此验证是否成功）："
+          echo "✅ 锁定目标文件: $TARGET_FILE"
+          echo "📄 打印文件原始内容（用于排错）："
+          cat "$TARGET_FILE"
+          
+          echo "🛠️ 开始应用补丁..."
+          
+          # 核心魔法：直接把所有 '== "lo"' (是lo则...) 替换为 '!= "ppp0"' (不是ppp0则...)
+          # 这样就实现了：如果不是 ppp0，就执行后面的 continue (跳过)
+          # 我们同时匹配双引号 "lo" 和单引号 'lo' 以防万一
+          
+          sed -i 's/== "lo"/!= "ppp0"/g' "$TARGET_FILE"
+          sed -i "s/== 'lo'/!= 'ppp0'/g" "$TARGET_FILE"
+          
+          echo "🎉 补丁应用完成！检查修改点："
           git diff
 
       - name: Build ARM64 Binary
