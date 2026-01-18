@@ -1,0 +1,48 @@
+name: Build Nezha Agent V1 for BE86U (ppp0 Only)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout V1 Agent Code
+        uses: actions/checkout@v4
+        with:
+          repository: nezhahq/agent  # 👈 这里改成了新版独立仓库
+          ref: main                  # 使用最新代码
+
+      - name: Setup Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.22'         # V1 通常需要更新的 Go 版本
+
+      - name: Patch Agent (Whitelist ppp0)
+        run: |
+          echo "正在修改源码..."
+          # 策略：V1 Agent 的监控代码通常在 pkg/monitor 附近
+          # 我们查找包含 "lo" (回环) 和 "continue" 的行，这通常是过滤逻辑
+          # 然后将其强行替换为：如果网卡名不是 ppp0，就 continue (跳过)
+          
+          # 1. 查找并替换 (使用更通用的正则，适配 V1 的变量名可能是 n.Name 或 nic.Name)
+          grep -rl '== "lo".*continue' . | xargs sed -i 's/if .* == "lo".*continue/if n.Name != "ppp0" { continue }/g'
+          
+          # 2. 以防万一变量名是 nic 或 io，做个备用替换（Go 编译器会忽略无效的替换，因为只生效一个）
+          grep -rl '== "lo".*continue' . | xargs sed -i 's/if .* == "lo".*continue/if nic.Name != "ppp0" { continue }/g'
+          grep -rl '== "lo".*continue' . | xargs sed -i 's/if .* == "lo".*continue/if io.Name != "ppp0" { continue }/g'
+
+          echo "修改完成，差异检查："
+          git diff
+
+      - name: Build ARM64 Binary
+        run: |
+          # V1 的入口通常在 cmd/agent
+          cd cmd/agent
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags "-s -w -extldflags '-static'" -o nezha-agent-v1-ppp0
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nezha-agent-v1-ppp0-be86u
+          path: cmd/agent/nezha-agent-v1-ppp0
