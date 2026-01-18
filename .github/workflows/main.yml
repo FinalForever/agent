@@ -1,4 +1,4 @@
-name: Build Nezha Agent V1 (Final Fix)
+name: Build Nezha Agent V1 (Source Code Fixed)
 
 on:
   workflow_dispatch:
@@ -18,24 +18,20 @@ jobs:
         with:
           go-version: '1.22'
 
-      - name: Patch Monitor Code (Targeted Fix)
+      - name: Patch NIC Code (Inject Filter)
         run: |
-          # 我们已经确认了核心文件路径，直接精准修改
           TARGET_FILE="pkg/monitor/nic/nic.go"
           
-          echo "🎯 目标锁定: $TARGET_FILE"
+          echo "🎯 目标文件: $TARGET_FILE"
           
-          # 1. 简单暴力的逻辑反转：
-          # 原理：源码里一定有一句判断 '== "lo"' (如果是回环lo，就跳过/continue)
-          # 我们把它改成 '!= "ppp0"' (如果不是 ppp0，就跳过/continue)
-          # 这样就实现了【只监控 ppp0】
+          # 核心修改逻辑：
+          # 源码第 42 行是: for _, v := range nc {
+          # 我们利用 sed 将其替换为: for _, v := range nc { if v.Name != "ppp0" { continue }
+          # 这样，在进入任何官方判断逻辑之前，只要不是 ppp0，直接被踢出，无法计入流量。
           
-          sed -i 's/== "lo"/!= "ppp0"/g' "$TARGET_FILE"
+          sed -i 's/for _, v := range nc {/for _, v := range nc { if v.Name != "ppp0" { continue }/g' "$TARGET_FILE"
           
-          # 双重保险：有些代码可能写的是 if "lo" == ...
-          sed -i 's/"lo" ==/"ppp0" !=/g' "$TARGET_FILE"
-          
-          echo "✅ 修改完成！差异如下："
+          echo "✅ 代码修改完成！差异如下："
           git diff
 
       - name: Build ARM64 Binary
